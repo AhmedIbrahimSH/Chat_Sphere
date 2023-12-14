@@ -20,6 +20,8 @@ class PeerServer(threading.Thread):
         # keeps the username of the peer
         self.username = username
         # tcp socket for peer server
+        #AF_INET is used for IPv4
+        #SOCK_STREAM is used for TCP
         self.tcpServerSocket = socket(AF_INET, SOCK_STREAM)
         # port number of the peer server
         self.peerServerPort = peerServerPort
@@ -47,17 +49,21 @@ class PeerServer(threading.Thread):
         # first checks to get it for windows devices
         # if the device that runs this application is not windows
         # it checks to get it for macos devices
+        # get hostname of localHost --> ex: hostname: mysystem.local 
+        # ip address of mysystem.local is the user's ip address
         hostname=gethostname()
         try:
             self.peerServerHostname=gethostbyname(hostname)
         except gaierror:
             import netifaces as ni
+            #get the ipv4 address of the device --> ip address of the user.
             self.peerServerHostname = ni.ifaddresses('en0')[ni.AF_INET][0]['addr']
 
         # ip address of this peer
         #self.peerServerHostname = 'localhost'
         # socket initializations for the server of the peer
         self.tcpServerSocket.bind((self.peerServerHostname, self.peerServerPort))
+        # server listens for maximum queue of 4 connections
         self.tcpServerSocket.listen(4)
         # inputs sockets that should be listened
         inputs = [self.tcpServerSocket]
@@ -65,15 +71,20 @@ class PeerServer(threading.Thread):
         while inputs and self.isOnline:
             # monitors for the incoming connections
             try:
+                # select functions watches inputs for readable, writable, exceptional conditions and returns 3 lists
                 readable, writable, exceptional = select.select(inputs, [], [])
                 # If a server waits to be connected enters here
                 for s in readable:
                     # if the socket that is receiving the connection is 
                     # the tcp socket of the peer's server, enters here
+                    # monitoring our own socket
                     if s is self.tcpServerSocket:
                         # accepts the connection, and adds its connection socket to the inputs list
                         # so that we can monitor that socket as well
+                        # connceted is the socket that is connected to this peer's server -> socketObject
+                        # addr is the ip address of the peer that is connected to this peer's server -> tuplr
                         connected, addr = s.accept()
+                        # sets the socket to non-blocking
                         connected.setblocking(0)
                         inputs.append(connected)
                         # if the user is not chatting, then the ip and the socket of
@@ -86,6 +97,7 @@ class PeerServer(threading.Thread):
                     # is used to communicate with a connected peer, then enters here
                     else:
                         # message is received from connected peer
+                        #set buffer size to 1024 then decode the message
                         messageReceived = s.recv(1024).decode()
                         # logs the received message
                         logging.info("Received from " + str(self.connectedPeerIP) + " -> " + str(messageReceived))
@@ -128,7 +140,7 @@ class PeerServer(threading.Thread):
                         elif messageReceived[:2] != ":q" and len(messageReceived)!= 0:
                             print(self.chattingClientName + ": " + messageReceived)
                         # if the message received is a quit message ':q',
-                        # makes ischatrequested 1 to receive new incoming request messages
+                        # makes ischatrequested 0 to receive new incoming request messages
                         # removes the socket of the connected peer from the inputs list
                         elif messageReceived[:2] == ":q":
                             self.isChatRequested = 0

@@ -1,0 +1,25 @@
+# message request 
+
+"CHAT-REQUEST 'Peer-port-number' 'username of sending peer'"
+
+# busy message
+
+"BUSY" --> then removes and the peer can request connection again later
+
+# chat request approved response
+
+"OK 'Username'"
+
+# chat request rejected response
+
+"REJECT"
+
+# Quit chat message
+
+":q ending side"
+
+"" --> error occurred and user quit the chat 
+
+# busy user message
+
+"BUSY"
