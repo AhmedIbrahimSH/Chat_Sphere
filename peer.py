@@ -9,6 +9,7 @@ import threading
 import time
 import select
 import logging
+import hashlib
 
 # Server side of peer
 class PeerServer(threading.Thread):
@@ -327,8 +328,16 @@ class peerMain:
             if choice is "1":
                 username = input("username: ")
                 password = input("password: ")
-                
-                self.createAccount(username, password)
+
+                # added by Ahmed Ibrahim , description below at function sha1_hash
+
+                while(len(password) < 8):
+                    print("Password must be more than 8 characters")
+                    password = input("password: ")
+
+                hashed_password = self.sha1_hash(password)
+
+                self.createAccount(username, hashed_password)
             # if choice is 2 and user is not logged in, asks for the username
             # and the password to login
             elif choice is "2" and not self.isOnline:
@@ -487,6 +496,17 @@ class peerMain:
         self.udpClientSocket.sendto(message.encode(), (self.registryName, self.registryUDPPort))
         self.timer = threading.Timer(1, self.sendHelloMessage)
         self.timer.start()
+
+    # added by Ahmed Ibrahim at 17 Dec
+    # function to hash the password taken by user when creating the account
+    # the hashing algorithm is sha1
+
+    def sha1_hash(input_string):
+        sha1 = hashlib.sha1()
+        sha1.update(input_string.encode('utf-8'))
+        hashed_string = sha1.hexdigest()
+        return hashed_string
+
 
 # peer is started
 main = peerMain()
