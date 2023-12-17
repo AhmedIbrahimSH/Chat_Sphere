@@ -1,16 +1,10 @@
-'''
-    ##  Implementation of peer
-    ##  Each peer has a client and a server side that runs on different threads
-    ##  150114822 - Eren Ulaş
-'''
-
 from socket import *
 import threading
-import time
 import select
 import logging
-import hashlib
-from hashing import HashingUtility
+from .hashing import HashingUtility
+from .peerports import ClientPorts
+CPorts = ClientPorts()
 
 # Server side of peer
 class PeerServer(threading.Thread):
@@ -165,7 +159,6 @@ class PeerServer(threading.Thread):
                 logging.error("OSError: {0}".format(oErr))
             except ValueError as vErr:
                 logging.error("ValueError: {0}".format(vErr))
-            
 
 # Client side of peer
 class PeerClient(threading.Thread):
@@ -299,7 +292,7 @@ class peerMain:
         self.registryPort = 15600
         # tcp socket connection to registry
         self.tcpClientSocket = socket(AF_INET, SOCK_STREAM)
-        self.tcpClientSocket.connect((self.registryName,self.registryPort))
+        self.tcpClientSocket.connect((self.registryName.strip(),self.registryPort))
         # initializes udp socket which is used to send hello messages
         self.udpClientSocket = socket(AF_INET, SOCK_DGRAM)
         # udp port of the registry
@@ -316,14 +309,17 @@ class peerMain:
         self.peerClient = None
         # timer initialization
         self.timer = None
+        # loggin flag
+        self.__is_logged_in = False
         
         choice = "0"
         # log file initialization
-        logging.basicConfig(filename="peer.log", level=logging.INFO)
+        logging.basicConfig(filename="log/peer.log", level=logging.INFO)
         # as long as the user is not logged out, asks to select an option in the menu
         while choice != "3":
             # menu selection prompt
-            choice = input("Choose: \nCreate account: 1\nLogin: 2\nLogout: 3\nSearch: 4\nStart a chat: 5\n")
+            self.__display_menu()
+            choice = input("Enter your choice: ")
             # if choice is 1, creates an account with the username
             # and password entered by the user
             if choice == "1":
@@ -344,7 +340,8 @@ class peerMain:
                 password = input("password: ")
 
                 # asks for the port number for server's tcp socket
-                peerServerPort = int(input("Enter a port number for peer server: "))
+                # peerServerPort = int(input("Enter a port number for peer server: "))
+                peerServerPort = CPorts.get_port()
 
                 hashing_utility = HashingUtility()
                 hashed_password = hashing_utility.sha1_hash(password)
@@ -365,6 +362,7 @@ class peerMain:
             # if choice is 3 and user is logged in, then user is logged out
             # and peer variables are set, and server and client sockets are closed
             elif choice == "3" and self.isOnline:
+                CPorts.release_port(self.peerServerPort)
                 self.logout(1)
                 self.isOnline = False
                 self.loginCredentials = (None, None)
@@ -375,6 +373,7 @@ class peerMain:
                 print("Logged out successfully")
             # is peer is not logged in and exits the program
             elif choice == "3":
+                CPorts.release_port(self.peerServerPort)
                 self.logout(2)
             # if choice is 4 and user is online, then user is asked
             # for a username that is wanted to be searched
@@ -449,15 +448,19 @@ class peerMain:
         logging.info("Received from " + self.registryName + " -> " + response)
         if response == "login-success":
             print("Logged in successfully...")
+            self.__is_logged_in = True
             return 1
         elif response == "login-account-not-exist":
             print("Account does not exist...")
+            self.__is_logged_in = False
             return 0
         elif response == "login-online":
             print("Account is already online...")
+            self.__is_logged_in = True
             return 2
         elif response == "login-wrong-password":
             print("Wrong password...")
+            self.__is_logged_in = False
             return 3
     
     # logout function
@@ -468,7 +471,8 @@ class peerMain:
             message = "LOGOUT " + self.loginCredentials[0]
             self.timer.cancel()
         else:
-            message = "LOGOUT"
+            message = "LOGOUT"    
+        self.__is_logged_in = False
         logging.info("Send to " + self.registryName + ":" + str(self.registryPort) + " -> " + message)
         self.tcpClientSocket.send(message.encode())
         
@@ -498,10 +502,24 @@ class peerMain:
     def sendHelloMessage(self):
         message = "HELLO " + self.loginCredentials[0]
         logging.info("Send to " + self.registryName + ":" + str(self.registryUDPPort) + " -> " + message)
-        self.udpClientSocket.sendto(message.encode(), (self.registryName, self.registryUDPPort))
+        self.udpClientSocket.sendto(message.encode(), (self.registryName.strip(), self.registryUDPPort))
         self.timer = threading.Timer(1, self.sendHelloMessage)
         self.timer.start()
 
+
+    def __display_menu(self):
+        if self.__is_logged_in:
+            print("3. Logout")
+            print("4. Search user")
+            print("5. Start a chat")
+            # print("2. Send message")
+            # print("3. Show my messages")
+            # print("4. Show all users")
+            # print("5. Exit")
+        else:
+            print("1. Create account")
+            print("2. Login")
+            # print("3. Exit")
 
 # peer is started
 main = peerMain()
