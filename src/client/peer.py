@@ -4,7 +4,17 @@ import select
 import logging
 from .hashing import HashingUtility
 from .peerports import ClientPorts
+import getpass
+
 CPorts = ClientPorts()
+
+RESET = "\033[0m"
+RED = "\033[31m"
+GREEN = "\033[32m"
+PALE_GREEN = "\033[95m"
+YELLOW = "\033[33m"
+BLUE = "\033[34m"
+
 
 # Server side of peer
 class PeerServer(threading.Thread):
@@ -134,7 +144,7 @@ class PeerServer(threading.Thread):
                         # if a message is received, and if this is not a quit message ':q' and 
                         # if it is not an empty message, show this message to the user
                         elif messageReceived[:2] != ":q" and len(messageReceived)!= 0:
-                            print(self.chattingClientName + ": " + messageReceived)
+                            print(YELLOW + self.chattingClientName + RESET + ": " + messageReceived)
                         # if the message received is a quit message ':q',
                         # makes ischatrequested 0 to receive new incoming request messages
                         # removes the socket of the connected peer from the inputs list
@@ -213,7 +223,9 @@ class PeerClient(threading.Thread):
                 # as long as the server status is chatting, this client can send messages
                 while self.peerServer.isChatRequested == 1:
                     # message input prompt
-                    messageSent = input(self.username + ": ")
+                    messageSent = input()
+                    print('\033[A' + ' ' * len(messageSent) + '\033[A', end='', flush=True)
+                    print()
                     # sends the message to the connected peer, and logs it
                     self.tcpClientSocket.send(messageSent.encode())
                     logging.info("Send to " + self.ipToConnect + ":" + str(self.portToConnect) + " -> " + messageSent)
@@ -223,6 +235,8 @@ class PeerClient(threading.Thread):
                         self.peerServer.isChatRequested = 0
                         self.isEndingChat = True
                         break
+                    if messageSent:
+                        print(PALE_GREEN + self.username + RESET + ": " + messageSent)
                 # if peer is not chatting, checks if this is not the ending side
                 if self.peerServer.isChatRequested == 0:
                     if not self.isEndingChat:
@@ -261,7 +275,9 @@ class PeerClient(threading.Thread):
             # client can send messsages as long as the server status is chatting
             while self.peerServer.isChatRequested == 1:
                 # input prompt for user to enter message
-                messageSent = input(self.username + ": ")
+                messageSent = input()
+                print('\033[A' + ' ' * len(messageSent) + '\033[A', end='', flush=True)
+                print()
                 self.tcpClientSocket.send(messageSent.encode())
                 logging.info("Send to " + self.ipToConnect + ":" + str(self.portToConnect) + " -> " + messageSent)
                 # if a quit message is sent, server status is changed
@@ -269,6 +285,8 @@ class PeerClient(threading.Thread):
                     self.peerServer.isChatRequested = 0
                     self.isEndingChat = True
                     break
+                if messageSent:
+                    print(PALE_GREEN + self.username + RESET + ": " + messageSent)
             # if server is not chatting, and if this is not the ending side
             # sends a quitting message to the server of the other peer
             # then closes the socket
@@ -314,7 +332,7 @@ class peerMain:
         
         choice = "0"
         # log file initialization
-        logging.basicConfig(filename="log/peer.log", level=logging.INFO)
+        logging.basicConfig(filename="src/log/peer.log", level=logging.INFO)
         # as long as the user is not logged out, asks to select an option in the menu
         while choice != "3":
             # menu selection prompt
@@ -337,12 +355,12 @@ class peerMain:
             # and the password to login
             elif choice == "2" and not self.isOnline:
                 username = input("username: ")
-                password = input("password: ")
+                password = getpass.getpass("password: ")
 
                 # asks for the port number for server's tcp socket
                 # peerServerPort = int(input("Enter a port number for peer server: "))
-                peerServerPort = CPorts.get_port()
-
+                peerServerPort = int(input("Peer server port number:")) #CPorts.get_port()
+                # print("Peer server port number is " + str(peerServerPort))
                 hashing_utility = HashingUtility()
                 hashed_password = hashing_utility.sha1_hash(password)
 
@@ -447,7 +465,7 @@ class peerMain:
         response = self.tcpClientSocket.recv(1024).decode()
         logging.info("Received from " + self.registryName + " -> " + response)
         if response == "login-success":
-            print("Logged in successfully...")
+            print(GREEN + "Logged in successfully..." + RESET)
             self.__is_logged_in = True
             return 1
         elif response == "login-account-not-exist":
@@ -455,11 +473,11 @@ class peerMain:
             self.__is_logged_in = False
             return 0
         elif response == "login-online":
-            print("Account is already online...")
+            print(PALE_GREEN + "Account is already online..." + RESET)
             self.__is_logged_in = True
             return 2
         elif response == "login-wrong-password":
-            print("Wrong password...")
+            print(RED + "Wrong password..." + RESET)
             self.__is_logged_in = False
             return 3
     
