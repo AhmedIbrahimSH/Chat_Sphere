@@ -37,7 +37,7 @@ def entry():
                             # resets the timeout for that peer since the hello message is received
                             tcpThreads[message[1]].resetTimeout()
                             print("Hello is received from " + message[1])
-                            logging.info("Received from " + clientAddress[0] + ":" + str(clientAddress[1]) + " -> " + " ".join(message))
+                            # logging.info("Received from " + clientAddress[0] + ":" + str(clientAddress[1]) + " -> " + " ".join(message))
 
     except:
         logging.error("Registry crashed")

@@ -2,6 +2,7 @@ from .globals import *
 from socket import *
 import threading
 import logging
+import pickle
 from .db import DB
 
 
@@ -81,7 +82,7 @@ class ClientThread(threading.Thread):
                             finally:
                                 self.lock.release()
 
-                            db.user_login(message[1], self.ip, message[3])
+                            db.user_login(message[1], self.ip, message[3], message[4])
                             # login-success is sent to peer,
                             # and a udp server thread is created for this peer, and thread is started
                             # timer thread of the udp server is started
@@ -138,6 +139,120 @@ class ClientThread(threading.Thread):
                         response = "search-user-not-found"
                         logging.info("Send to " + self.ip + ":" + str(self.port) + " -> " + response) 
                         self.tcpClientSocket.send(response.encode())
+                #   Create-room  #
+                elif message[0] == "CREATE-ROOM":
+                    # checks if a chat room with this name already exists
+                    if db.is_chat_room_exist(message[1]):
+                        response = "create-room-exist"
+                        logging.info("Send to " + self.ip + ":" + str(self.port) + " -> " + response) 
+                        self.tcpClientSocket.send(response.encode())
+                    # if chat room does not exist, then a new chat room is created
+                    else:
+                        db.create_chat_room(message[1], message[2])
+                        response = "create-room-success"
+                        logging.info("Send to " + self.ip + ":" + str(self.port) + " -> " + response) 
+                        self.tcpClientSocket.send(response.encode())
+                #   JOIN-ROOM   #
+                elif message[0] == "JOIN-ROOM":
+                    # checks if chat room exists
+                    if db.is_chat_room_exist(message[1]):
+                        # checks if peer is already a member of this chat room
+                        if message[2] in db.get_chat_room_members(message[1]):
+                            response = "join-room-already-member"
+                            logging.info("Send to " + self.ip + ":" + str(self.port) + " -> " + response) 
+                            self.tcpClientSocket.send(response.encode())
+                        # if peer is not a member of this chat room,
+                        # then peer is added to the chat room
+                        else:
+                            db.add_chat_room_member(message[1], message[2])
+                            response = "join-room-success"
+                            logging.info("Send to " + self.ip + ":" + str(self.port) + " -> " + response) 
+                            self.tcpClientSocket.send(response.encode())
+                    # if chat room does not exist,
+                    # then join-room-not-exist response is sent to peer
+                    else:
+                        response = "join-room-not-exist"
+                        logging.info("Send to " + self.ip + ":" + str(self.port) + " -> " + response) 
+                        self.tcpClientSocket.send(response.encode())
+                #   LIST-ROOM   #
+                elif message[0] == "LIST-ROOMS":
+                    # retrieves the list of chat rooms
+                    chat_rooms = db.get_chat_rooms()
+                    response = "list-room-success " + ",".join(chat_rooms)
+                    logging.info("Send to " + self.ip + ":" + str(self.port) + " -> " + "list-room-success") 
+                    self.tcpClientSocket.send(response.encode())
+                #   LIST-MEMBER #
+                elif message[0] == "LIST-MEMBER":
+                    # checks if chat room exists
+                    if db.is_chat_room_exist(message[1]):
+                        # retrieves the list of members of the chat room
+                        members = db.get_chat_room_members(message[1])
+                        response = "list-member-success " + " ".join(members)
+                        logging.info("Send to " + self.ip + ":" + str(self.port) + " -> " + response) 
+                        self.tcpClientSocket.send(response.encode())
+                    # if chat room does not exist,
+                    # then list-member-not-exist response is sent to peer
+                    else:
+                        response = "list-member-not-exist"
+                        logging.info("Send to " + self.ip + ":" + str(self.port) + " -> " + response) 
+                        self.tcpClientSocket.send(response.encode())
+                #   List-online-member  #
+                elif message[0] == "LIST-ONLINE-MEMBER":
+                    # checks if chat room exists
+                    if db.is_chat_room_exist(message[1]):
+                        # retrieves the list of online members of the chat room
+                        members = db.get_online_chat_members(message[1])
+                        response = {
+                            'header': 'list-online-member-success',
+                            'members': members
+                        }
+                        response = pickle.dumps(response)
+                        logging.info("Send to " + self.ip + ":" + str(self.port) + " -> " + 'list-online-member-success') 
+                        self.tcpClientSocket.send(response)
+                    # if chat room does not exist,
+                    # then list-online-member-not-exist response is sent to peer
+                    else:
+                        response = {
+                            'header': 'room-not-exist',
+                        }
+                        response = pickle.dumps(response)
+                        logging.info("Send to " + self.ip + ":" + str(self.port) + " -> " + 'list-online-member-success') 
+                        self.tcpClientSocket.send(response)
+                #  SEARCH-ROOM  #
+                elif message[0] == "SEARCH-ROOM":
+                    # checks if chat room exists
+                    if db.is_chat_room_exist(message[1]):
+                        # Retrieve room information from the database
+                        room_info = db.get_chat_room_info(message[1])
+                        room_name = room_info['room_name']
+                        owner = room_info['owner']
+                        # Get IP and port for each member
+                        members = room_info['members']
+                        members_with_ip = []
+                        for member in members:
+                            ip_port = db.get_peer_ip_port(member)
+                            members_with_ip.append((member, ip_port))
+                        # Format the response
+                        response = {
+                            'header': 'search-room-success', # 'search-room-not-exist
+                            'room_name': room_name,
+                            'owner': owner,
+                            'members': members_with_ip
+                        }
+                        # Serialize the response
+                        serialized_response = pickle.dumps(response)
+                        logging.info("Send to " + self.ip + ":" + str(self.port) + " -> " + str(response)) 
+                        self.tcpClientSocket.send(serialized_response)             
+                    # if chat room does not exist,
+                    # then search-room-not-exist response is sent to peer
+                    else:
+                        response = {
+                            'header': 'search-room-not-exist',
+                        }
+                        serialized_response = pickle.dumps(response)
+                        logging.info("Send to " + self.ip + ":" + str(self.port) + " -> " + response['header'])
+                        self.tcpClientSocket.send(response)
+               
             except OSError as oErr:
                 logging.error("OSError: {0}".format(oErr)) 
 
@@ -174,6 +289,6 @@ class UDPServer(threading.Thread):
     # resets the timer for udp server
     def resetTimer(self):
         self.timer.cancel()
-        self.timer = threading.Timer(3, self.waitHelloMessage)
+        self.timer = threading.Timer(5, self.waitHelloMessage)
         self.timer.start()
 
