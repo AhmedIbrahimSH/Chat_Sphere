@@ -73,7 +73,6 @@ class DB:
             "room_name": room_name,
             "owner": owner,
             "members": [owner],
-            "messages": []
         }
         self.chat_rooms.chat_rooms.insert_one(chat_room)
 

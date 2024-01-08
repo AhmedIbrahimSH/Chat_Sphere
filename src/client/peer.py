@@ -47,30 +47,40 @@ class UDPReceiver(threading.Thread):
             self.sender_colors = {}
             self.colors = [RED, GREEN, PURPLE, YELLOW, BLUE, ORANGE, CYAN, WHITE, BRIGHT_BLACK, BRIGHT_RED, BRIGHT_GREEN, BRIGHT_YELLOW, BRIGHT_BLUE, BRIGHT_MAGENTA, BRIGHT_CYAN, BRIGHT_WHITE]
             self._initialized = True
+            self.stop_flag = False
 
     def run(self):
         while True:
-            response = self.udpServerSocket.recvfrom(1024)
-            response = pickle.loads(response[0])
-            # Assign a color to the sender if they don't have one yet
-            if response["sender"] not in self.sender_colors:
-                self.sender_colors[response["sender"]] = self.colors[len(self.sender_colors) % len(self.colors)]
-            color = self.sender_colors[response["sender"]]
+            if self.stop_flag:
+                break
+            ready_to_read, _, _ = select.select([self.udpServerSocket], [], [])
+            if self.udpServerSocket in ready_to_read:
+                response = self.udpServerSocket.recvfrom(1024)
+                response = pickle.loads(response[0])
+                # Assign a color to the sender if they don't have one yet
+                if response["sender"] not in self.sender_colors:
+                    self.sender_colors[response["sender"]] = self.colors[len(self.sender_colors) % len(self.colors)]
+                color = self.sender_colors[response["sender"]]
 
-            if self.in_this_room and self.room_name:
-                print(color + response["sender"] + RESET + ": " + response["message"])
-            else:
-                print('\033[A' + ' ' * len("Enter your choice:") + '\033[A', end='', flush=True)
-                print()
-                print(f"received message from {color}{response['sender']}{RESET} in room {YELLOW}{response['room_name']}{RESET}")
-                self.unread_messages.append(response)
-                print("Enter your choice:")
+                if self.in_this_room and self.room_name:
+                    print(color + response["sender"] + RESET + ": " + response["message"])
+                else:
+                    print('\033[A' + ' ' * len("Enter your choice:") + '\033[A', end='', flush=True)
+                    print()
+                    print(f"received message from {color}{response['sender']}{RESET} in room {YELLOW}{response['room_name']}{RESET}")
+                    self.unread_messages.append(response)
+                    self.unread_messages.append("")
+                    print("Enter your choice:")
+    def stop(self):
+        self.stop_flag = True
+        self.join()
     
     def print_unread_messages(self):
         for message in self.unread_messages:
-            color = self.sender_colors[message["sender"]]
-            print(f"{color}{message['sender']}{RESET}: {message['message']}")
-            self.unread_messages.remove(message)
+            if message["room_name"] == self.room_name:
+                color = self.sender_colors[message["sender"]]
+                print(f"{color}{message['sender']}{RESET}: {message['message']}")
+                self.unread_messages.remove(message)
 
 # Server side of peer
 class PeerServer(threading.Thread):
@@ -396,13 +406,21 @@ class peerMain:
 
     # peer initializations
     def __init__(self):
-        self.registryName = input("Enter IP address of registry: ") # ip address of the registry
-        #self.registryName = 'localhost'
-        self.registryPort = 15600                                   # port number of the registry
-        
-        self.tcpClientSocket = socket(AF_INET, SOCK_STREAM)         # tcp socket connection to registry
-        self.tcpClientSocket.connect((self.registryName.strip(),self.registryPort)) 
-        
+        while True:
+            try:
+                self.registryName = input("Enter IP address of registry: ") # ip address of the registry
+                #self.registryName = 'localhost'
+                self.registryPort = 15600                                   # port number of the registry
+                self.tcpClientSocket = socket(AF_INET, SOCK_STREAM)         # tcp socket connection to registry
+                self.tcpClientSocket.connect((self.registryName.strip(),self.registryPort)) 
+            except ConnectionRefusedError as crErr:
+                print("Registry is not online...")
+                continue
+            except error as err:
+                print("can't connect to registry...")
+                continue
+            break
+
         self.udpClientSocket = socket(AF_INET, SOCK_DGRAM)          # initializes udp socket which is used to send hello messages
         self.registryUDPPort = 15500                                # udp port of the registry
         
@@ -468,8 +486,11 @@ class peerMain:
                 self.loginCredentials = (None, None)
                 self.peerServer.isOnline = False
                 self.peerServer.tcpServerSocket.close()
+                self.peerServer.udp_receiver.stop()
+                del self.peerServer.udp_receiver
                 if self.peerClient is not None:
                     self.peerClient.tcpClientSocket.close()
+                del self.peerServer
                 print("Logged out successfully")
             # logout
             elif choice == "3":
@@ -557,7 +578,9 @@ class peerMain:
                 logging.info("Send to " + self.peerServer.connectedPeerIP + " -> REJECT")
             # if choice is cancel timer for hello message is cancelled
             elif choice == "CANCEL":
+                self.peerServer.udp_receiver.stop()
                 self.timer.cancel()
+
                 break
         # if main process is not ended with cancel selection
         # socket of the client is closed
@@ -569,9 +592,14 @@ class peerMain:
         # join message to create an account is composed and sent to registry
         # if response is success then informs the user for account creation
         # if response is exist then informs the user for account existence
-        message = "JOIN " + username + " " + password
-        logging.info("Send to " + self.registryName + ":" + str(self.registryPort) + " -> " + message)
-        self.tcpClientSocket.send(message.encode())
+        message = {
+            "header" : "JOIN",
+            "username" : username,
+            "password" : password,
+        }
+        logging.info("Send to " + self.registryName + ":" + str(self.registryPort) + " -> " + message["header"])
+        pickle_message = pickle.dumps(message)
+        self.tcpClientSocket.send(pickle_message)
         response = self.tcpClientSocket.recv(1024).decode()
         logging.info("Received from " + self.registryName + " -> " + response)
         if response == "join-success":
@@ -583,10 +611,17 @@ class peerMain:
     def login(self, username, password, peerServerPort, udpServerPort):
         # a login message is composed and sent to registry
         # an integer is returned according to each response
-        message = "LOGIN " + username + " " + password  + " " + str(peerServerPort) + " " + str(udpServerPort)
-        logging.info("Send to " + self.registryName + ":" + str(self.registryPort) + " -> " + message)
-        
-        self.tcpClientSocket.send(message.encode())
+        message = {
+            "header" : "LOGIN",
+            "username" : username,
+            "password" : password,
+            "peerServerPort" : peerServerPort,
+            "udpServerPort" : udpServerPort
+        }
+        logging.info("Send to " + self.registryName + ":" + str(self.registryPort) + " -> " + message["header"])
+        pickle_message = pickle.dumps(message)
+        self.tcpClientSocket.send(pickle_message)
+
         response = self.tcpClientSocket.recv(1024).decode()
         logging.info("Received from " + self.registryName + " -> " + response)
         
@@ -611,23 +646,32 @@ class peerMain:
     def logout(self, option):
         # a logout message is composed and sent to registry
         # timer is stopped
+        message = {
+            "header" : "LOGOUT",
+            "username" : None
+        }
         if option == 1:
-            message = "LOGOUT " + self.loginCredentials[0]
+            message['username'] = self.loginCredentials[0]
             self.timer.cancel()
-        elif option == 2:
-            message = "LOGOUT"    
+            self.peerServer.udp_receiver.stop()
         self.__is_logged_in = False
-        logging.info("Send to " + self.registryName + ":" + str(self.registryPort) + " -> " + message)
-        self.tcpClientSocket.send(message.encode())
+        logging.info("Send to " + self.registryName + ":" + str(self.registryPort) + " -> " + message["header"])
+        pickle_message = pickle.dumps(message)
+        self.tcpClientSocket.send(pickle_message)
         
     # function for searching an online user
     def searchUser(self, username):
         # a search message is composed and sent to registry
         # custom value is returned according to each response
         # to this search message
-        message = "SEARCH " + username
-        logging.info("Send to " + self.registryName + ":" + str(self.registryPort) + " -> " + message)
-        self.tcpClientSocket.send(message.encode())
+        message = {
+            "header" : "SEARCH",
+            "username" : username
+        }
+        logging.info("Send to " + self.registryName + ":" + str(self.registryPort) + " -> " + message["header"])
+        pickle_message = pickle.dumps(message)
+        self.tcpClientSocket.send(pickle_message)
+
         response = self.tcpClientSocket.recv(1024).decode().split()
         logging.info("Received from " + self.registryName + " -> " + " ".join(response))
         if response[0] == "search-success":
@@ -650,8 +694,13 @@ class peerMain:
         self.timer.start()
 
     def create_room(self, room_name):
+        message = {
+            "header": "CREATE-ROOM",
+            "owner": self.loginCredentials[0],
+            "room_name": room_name
+        }
         message = "CREATE-ROOM " + room_name + " " + self.loginCredentials[0]
-        logging.info("Send to " + self.registryName + ":" + str(self.registryPort) + " -> " + message)
+        logging.info("Send to " + self.registryName + ":" + str(self.registryPort) + " -> " + message['header'])
         self.tcpClientSocket.send(message.encode())
 
         # Receive the response from the server
@@ -666,8 +715,13 @@ class peerMain:
             logging.info("Received from " + self.registryName + ":" + str(self.registryPort) + " -> Unknown response: " + response)
         
     def join_room(self, room_name):
+        message = {
+            "header": "JOIN-ROOM",
+            "room_name": room_name,
+            "username": self.loginCredentials[0]
+        }
         message = "JOIN-ROOM " + room_name + " " + self.loginCredentials[0]
-        logging.info("Send to " + self.registryName + ":" + str(self.registryPort) + " -> " + message)
+        logging.info("Send to " + self.registryName + ":" + str(self.registryPort) + " -> " + message['header'])
         self.tcpClientSocket.send(message.encode())
 
         # Receive the response from the server
@@ -684,9 +738,12 @@ class peerMain:
             logging.info("Received from " + self.registryName + ":" + str(self.registryPort) + " -> Unknown response: " + response)
 
     def list_rooms(self):
-        message = "LIST-ROOMS"
-        logging.info("Send to " + self.registryName + ":" + str(self.registryPort) + " -> " + message)
-        self.tcpClientSocket.send(message.encode())
+        message = {
+            "header": "LIST-ROOMS"
+        }
+        logging.info("Send to " + self.registryName + ":" + str(self.registryPort) + " -> " + message["header"])
+        pickle_message = pickle.dumps(message)
+        self.tcpClientSocket.send(pickle_message)
         # Receive the response from the server
         response = self.tcpClientSocket.recv(1024).decode().split(',')
         # Handle the response
@@ -696,15 +753,36 @@ class peerMain:
             logging.info("Received from " + self.registryName + ":" + str(self.registryPort) + " -> " + response[0])
             print("| "+" | ".join(response[1:]) + " |")
 
-    def search_room(self, room_name):
-        message = "SEARCH-ROOM " + room_name
-        logging.info("Send to " + self.registryName + ":" + str(self.registryPort) + " -> " + message)
-        self.tcpClientSocket.send(message.encode())
+    def list_my_rooms(self):
+        message = {
+            "header": "LIST-MY-ROOMS",
+            "username": self.loginCredentials[0]
+        }
+        logging.info("Send to " + self.registryName + ":" + str(self.registryPort) + " -> " + message["header"])
+        pickle_message = pickle.dumps(message)
+        self.tcpClientSocket.send(pickle_message)
         # Receive the response from the server
-        serialized_response = self.tcpClientSocket.recv(1024)
-        # Unpickle the response
-        room_info = pickle.loads(serialized_response)
+        response = self.tcpClientSocket.recv(1024).decode().split(',')
         # Handle the response
+        if response[0] == "list-my-rooms-empty":
+            logging.info("Received from " + self.registryName + ":" + str(self.registryPort) + " -> You are not a member of any chat room")
+        else:
+            logging.info("Received from " + self.registryName + ":" + str(self.registryPort) + " -> " + response[0])
+            print("| "+" | ".join(response[1:]) + " |")
+
+    def search_room(self, room_name):
+        # Send the message to the server
+        message = {
+            "header": "SEARCH-ROOM",
+            "room_name": room_name
+        }
+        logging.info("Send to " + self.registryName + ":" + str(self.registryPort) + " -> " + message["header"])
+        pickle_message = pickle.dumps(message)
+        self.tcpClientSocket.send(pickle_message)
+        
+        # Receive the response from the server
+        pickle_response = self.tcpClientSocket.recv(1024)
+        room_info = pickle.loads(pickle_response)
         if room_info['header'] == "search-room-not-exist":
             logging.info("Received from " + self.registryName + ":" + str(self.registryPort) + " -> Chat room does not exist")
             return None
@@ -716,14 +794,18 @@ class peerMain:
             return (room_name, owner, members)
 
     def open_room(self, room_name):
-        message = "OPEN-ROOM " + room_name
-        logging.info("Send to " + self.registryName + ":" + str(self.registryPort) + " -> " + message)
-        self.tcpClientSocket.send(message.encode())
+        # Send the message to the server
+        message = {
+            "header": "OPEN-ROOM",
+            "room_name": room_name
+        }
+        logging.info("Send to " + self.registryName + ":" + str(self.registryPort) + " -> " + message["header"])
+        pickle_message = pickle.dumps(message)
+        self.tcpClientSocket.send(pickle_message)
+        
         # Receive the response from the server
-        response = self.tcpClientSocket.recv(1024)
-        # Unpickle the response
-        room_info = pickle.loads(response)
-        # Handle the response
+        pickle_response = self.tcpClientSocket.recv(1024)
+        room_info = pickle.loads(pickle_response)
         if room_info is None:
             logging.info("Received from " + self.registryName + ":" + str(self.registryPort) + " -> Chat room does not exist")
             return None
@@ -735,11 +817,16 @@ class peerMain:
             return (room_name, owner, members)
 
     def get_online_members(self, room_name):
-        message = "LIST-ONLINE-MEMBER " + room_name
-        logging.info("Send to " + self.registryName + ":" + str(self.registryPort) + " -> " + message)
-        self.tcpClientSocket.send(message.encode())
+        # Send the message to the server
+        message = {
+            "header": "LIST-ONLINE-MEMBER",
+            "room_name": room_name
+        }
+        logging.info("Send to " + self.registryName + ":" + str(self.registryPort) + " -> " + message["header"])
+        pickle_message = pickle.dumps(message)
+        self.tcpClientSocket.send(pickle_message)
         # Receive the response from the server
-        response = self.tcpClientSocket.recv(1024)
+        pickle_response = self.tcpClientSocket.recv(1024)
         response:dict = pickle.loads(response)
         # Handle the response
         if response["header"] == "list-online-member-not-exist":
@@ -760,6 +847,7 @@ class peerMain:
             print("8. join room")
             print("9. search room")
             print("10. open chat room")
+            print("")
         else:
             print("1. Create account")
             print("2. Login")
