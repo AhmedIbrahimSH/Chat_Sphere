@@ -9,4 +9,5 @@ to run a peer client instance
 `python src/run_client.py`
 
 
-Link to video showing app features :  https://drive.google.com/file/d/1YSWV9fltnroAa6I-hxNxZYoKdt6v_-H0/view?usp=sharing
+Link to video showing app features :  https://drive.google.com/file/d/1ABLWezEZIgL6XURvH0sffBQoNZVqTFvo/view?usp=sharing
+
